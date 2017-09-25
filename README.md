@@ -26,10 +26,11 @@ Using my TRRS Idea i use it for home automation controled by the anymote app
 
 ## libraries
 
-cd Arduino/libraries/
-git clone https://github.com/sebastienwarin/IRremoteESP8266.git
-git clone https://github.com/kentaylor/WiFiManager.git
-git clone https://github.com/datacute/DoubleResetDetector
+* https://github.com/sebastienwarin/IRremoteESP8266.git
+* https://github.com/kentaylor/WiFiManager.git
+* https://github.com/datacute/DoubleResetDetector
+
+place in Arduino\libraries
 
 ### Hardware
 

@@ -1,80 +1,84 @@
 /*
+originally Created by probonopd
+Version 5-WM2 wooby6
+
   Implements a subset of the iTach API Specification Version 1.5
   http://www.globalcache.com/files/docs/API-iTach.pdf
-  and
-  LIRC server including the SEND_CCF_ONCE extensions
-  http://www.harctoolbox.org/lirc_ccf.html#Extensions+to+the+irsend+command
   Tested with
-  - IrScrutinizer 1.1.2 from https://github.com/bengtmartensson/harctoolboxbundle
-  - iPhone iRule app with remote created with cloud codes online at http://iruleathome.com
-  TODO: Implement capture from a modulated receiver, e.g., https://www.analysir.com/blog/2016/01/14/esp8266-nodemcu-infrared-decoding-added-to-analysir/
-        Implement repeats
-        Implement more commands, e.g., stopir
-        Check with OpenRemote http://sourceforge.net/projects/openremote/
-        Check with apps from http://www.globalcache.com/partners/control-apps/
-        MQTT?
-        WebSockets?
-        Decode and Encode using John S. Fine's algorithms?
-        Art-Net DMX512-A (professional stage lighting; apps exist)
+  - Anymote Itach
+**************************
+CHANGELOG
+  fork of ESP8266iTachEmulatorGUI
+  WifiManager version
+  added OTA
+  Removed unneeded reciever code
+  removed unneeded RCswitch
+  Removed unneeded LIRC
+  Removed debug telnet server, converted debugsend back to serial
+  removed unnessary raw ir code conversion
+  updated code to work with IRremoteESP8266 v2.1.1
+  
+TODO
+fix static IP
+
+
+Circuit
+  reffer to google "ESP infared"
+  # can also be used with an IR repeater via a TRRS/audio Jack
+  be sure to check the pinout of your repeater before doing this
+
+  #Im using a cheap unbranded china one with 3 reciver jacks, 6 Emitter jacks, USB/12v power
+  with the reciver end being wired with Tip - DATA, Ring - 5v, Sleeve - GND
+  my circuit only uses data & GND
 */
 
-/*
-  Circuit:
-  To get good range, attach a resistor to pin 12 of the ESP-12E and connect the resistor to the G pin of a 2N7000 transistor.
-  If you look at the flat side of the 2N7000 you have S, G, D pins.
-  Connect S to GND, G to the resistor to the MCU, and D to the IR LED short pin.
-  The long pin of the IR LED is connected to +3.3V.
-  I picked the 2N7000 because unlike others it will not pull pin 2 down which would prevent the chip from booting.
-*/
+//start setup
+// Set IR Blaster Pin
+//nodemcu- 0=D3,1=U0TX,2=D4,4=D2/LED/U1TX,3=U0RX,5=D1,6=CLK,7=SD0,8=SD1,9=SD2,10=SD3,11=CMD,12=D6,13=D7,14=D5,15=D8,16=D0
+#define infraredLedPin 5 //nodemcu
+//esp-01-1=TX,2=GPIO2/tx2,0=GPIO0/spi,3=RX
+//#define infraredLedPin 2 //esp-01
+//#define infraredLedPin 0 //esp-01
+#define PIN_LED 2  //set to -1 to disable, nodemcu_LED=2, ESP-01_LED=1 + need to switch tx to GPIO02
+//PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0TXD_U, FUNC_GPIO1) //change ESP-01 tx to GPIO01
+//PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO2_U, FUNC_U1TXD_U) //move TX
+//end setup
 
 #include <ESP8266WiFi.h>
 #include <IRremoteESP8266.h>
-#include <RCSwitch.h>
-#include <ProntoHex.h>
+#include <IRsend.h>
 
-// For ESP Manager
-#include <FS.h> //  Settings saved to SPIFFS
-#include <ESP8266HTTPClient.h>
-#include <ESP8266httpUpdate.h>
-#include <ESPAsyncTCP.h>
-#include <ESPAsyncWebServer.h>
-#include <AsyncJson.h>
-#include <ArduinoOTA.h>
-#include <ArduinoJson.h> // required for settings file to make it readable
-#include <Hash.h>
-#include <ESPmanager.h>
+// For WifiManager
 
-AsyncWebServer HTTP(80);
-ESPmanager settings(HTTP, SPIFFS);
+#include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
+#include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
+#include <WiFiManager.h>          //https://github.com/kentaylor/WiFiManager
 
-// GPIO12 = 12 = labelled "D6" on the NodeMCU board
-const int infraredLedPin = 12; // ############# CHECK IF THE LED OR TRANSISTOR (RECOMMENDED) IS ACTUALLY ATTACHED TO THIS PIN
+#include "ArduinoOTA.h"
+#include <WiFiUdp.h>
+#include <DoubleResetDetector.h>  //https://github.com/datacute/DoubleResetDetector
+
+// Number of seconds after reset during which a 
+// subseqent reset will be considered a double reset.
+#define DRD_TIMEOUT 7
+
+// RTC Memory Address for the DoubleResetDetector to use
+#define DRD_ADDRESS 0
+
+DoubleResetDetector drd(DRD_TIMEOUT, DRD_ADDRESS);
+
+// Indicates whether ESP has WiFi credentials saved from previous session, or double reset detected
+bool initialConfig = false;
 
 extern const String MYVAL;
-
-WiFiClient Telnet;
-
 IRsend irsend(infraredLedPin);
-
 unsigned int irrawCodes[99];
 int rawCodeLen; // The length of the code
 int freq;
-
-RCSwitch mySwitch = RCSwitch();
-
-ProntoHex ph = ProntoHex();
-
-// A WiFi server for telnet-like communication on port 4998
+// A WiFi server for wifi2IR communication on port 4998
 #define MAX_SRV_CLIENTS 10 // How many clients may connect at the same time
 WiFiServer server(4998);
 WiFiClient serverClients[MAX_SRV_CLIENTS];
-
-// I use debugSend() instead of the serial console to send debug information
-// TODO: Receive, too. This way I can free up the TX and RX pins on the ESP8266
-// and use them for other purposes
-#define MAX_DBG_SRV_CLIENTS 1 // How many clients may connect at the same time
-WiFiServer debugServer(22);
-WiFiClient debugServerClients[MAX_DBG_SRV_CLIENTS];
 
 // A UDP instance to let us send and receive packets over UDP
 WiFiUDP Udp;
@@ -88,100 +92,128 @@ const long interval = random(10000, 60000); // Send every 10...60 seconds like t
 extern "C" {
 #include "user_interface.h"
 }
-
-int RECV_PIN = D1; // an IR detector/demodulatord
-IRrecv irrecv(RECV_PIN);
-decode_results results;
-
 void setup() {
-
-  irsend.begin();
-  irrecv.enableIRIn(); // Start the receiver
-  mySwitch.enableTransmit(3); // Pin 3 is RXD; 433 MHz
-
-  ////////////
-
   Serial.begin(115200);
-  SPIFFS.begin();
+  Serial.println("Booting");
+  
+  //		WiFiManager
+  if(PIN_LED != -1){
+    pinMode(PIN_LED, OUTPUT);
+  }
+    //WiFi.printDiag(Serial); //Remove this line if you do not want to see WiFi password printed
+  if (WiFi.SSID()==""){
+    Serial.println("We haven't got any access point credentials, so get them now");   
+    initialConfig = true;
+  }
+  if (drd.detectDoubleReset()) {
+    Serial.println("Double Reset Detected");
+    initialConfig = true;
+  }
+  if (initialConfig) {
+    Serial.println("Starting configuration portal.");
+    if(PIN_LED != -1){
+      digitalWrite(PIN_LED, LOW); // turn the LED on by making the voltage LOW to tell us we are in configuration mode.
+    }
+    //Local intialization. Once its business is done, there is no need to keep it around
+    WiFiManager wifiManager;
+    //sets timeout in seconds until configuration portal gets turned off.
+    //If not specified device will remain in configuration mode until
+    //switched off via webserver or device is restarted.
+    //wifiManager.setConfigPortalTimeout(600);
 
-  Serial.println("");
-  Serial.println(F("Example ESPconfig - using ESPAsyncWebServer"));
+    //it starts an access point 
+    //and goes into a blocking loop awaiting configuration
+    if (!wifiManager.startConfigPortal()) {
+      Serial.println("Not connected to WiFi but continuing anyway.");
+    } else {
+      //if you get here you have connected to the WiFi
+      Serial.println("connected...yeey :)");
+    }
+    if(PIN_LED != -1){
+      digitalWrite(PIN_LED, HIGH); // Turn led off as we are not in configuration mode.
+    }
+    ESP.reset(); // This is a bit crude. For some unknown reason webserver can only be started once per boot up 
+    // so resetting the device allows to go back into config mode again when it reboots.
+    delay(5000);
+  }
+  if(PIN_LED != -1){
+    digitalWrite(PIN_LED, HIGH); // Turn led off as we are not in configuration mode.
+  }
+  WiFi.mode(WIFI_STA); // Force to station mode because if device was switched off while in access point mode it will start up next time in access point mode.
+  unsigned long startedAt = millis();
+  Serial.print("After waiting ");
+  int connRes = WiFi.waitForConnectResult();
+  float waited = (millis()- startedAt);
+  Serial.print(waited/1000);
+  Serial.print(" secs in setup() connection result is ");
+  Serial.println(connRes);
+  if (WiFi.status()!=WL_CONNECTED){
+    Serial.println("failed to connect, finishing setup anyway");
+  } else{
+    Serial.print("local ip: ");
+    Serial.println(WiFi.localIP());
+  }
+  ///////////////////////////////////////////
 
-  Serial.printf("Sketch size: %u\n", ESP.getSketchSize());
-  Serial.printf("Free size: %u\n", ESP.getFreeSketchSpace());
+  //		OTA
+  // Port defaults to 8266
+  // ArduinoOTA.setPort(8266);
 
-  settings.begin();
+  // Hostname defaults to esp8266-[ChipID]
+  // ArduinoOTA.setHostname("myesp8266");
 
-  // https://github.com/me-no-dev/ESPAsyncWebServer
-  HTTP.on("/", HTTP_ANY, [](AsyncWebServerRequest * request) {
-    request->send(200, "text/html", "<html><body><p>WF2IR on port 4998 and LIRC server on port 4998 and debug telnet server on port 22</p><p><a href='/espman/'>Administration</a></p></body></html>");
+  // No authentication by default
+  // ArduinoOTA.setPassword("admin");
+  ArduinoOTA.onStart([]() {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH)
+      type = "sketch";
+    else // U_SPIFFS
+      type = "filesystem";
+
+    // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+    Serial.println("Start updating " + type);
   });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nEnd");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+  ArduinoOTA.begin();
+  Serial.println("\n OTA Ready");
+  ////////////////////////////////////////////////
 
-  HTTP.begin();
-
-  Serial.print(F("Free Heap: "));
-  Serial.println(ESP.getFreeHeap());
-
-  ////////////
-
-  // mySwitch.switchOff(4, 2); // ###################################################### Works!
-
-  // Start telnet server
+  // Start Wifi2IR server
+  irsend.begin();
   server.begin();
   server.setNoDelay(true);
 
-  debugServer.begin();
-  debugServer.setNoDelay(true);
-
-  Serial.print("Ready! Use IrScrutinizer to connect to port ");
-  Serial.print(WiFi.localIP());
-  Serial.println(" 4998");
-
+  Serial.print("\n Wifi2IR Ready!");
+  Serial.print("\n ");
   // Send first UDP Discovery Beacon during setup; then do it periodically below
   sendDiscoveryBeacon();
 }
 
-String stringDecode;
-
-int clientToSendReceivedCodeTo = MAX_SRV_CLIENTS;
-
-void dump(decode_results *results) {
-  int count = results->rawlen;
-  unsigned long freq = 38400;        // FIXME DON'T HARDCODE _________________________________________
-  stringDecode = "sendir,1:0,0,";
-  stringDecode += freq;
-  stringDecode += (",1,1,");
-  for (int i = 0; i < count; i++) {
-    if (i & 1) {
-      stringDecode += results->rawbuf[i] * USECPERTICK * freq / 1000000 - 1, DEC;
-    } else
-    {
-      stringDecode += (unsigned long) results->rawbuf[i] * USECPERTICK * freq / 1000000 - 1, DEC;
-    }
-    stringDecode += ",";
-  }
-  stringDecode += "999";
-  Serial.println(stringDecode);
-  debugSend(stringDecode);
-
-  if (clientToSendReceivedCodeTo != MAX_SRV_CLIENTS) {
-    send(clientToSendReceivedCodeTo, stringDecode);
-    clientToSendReceivedCodeTo = MAX_SRV_CLIENTS;
-  }
-}
-
 String inData;
-String lircInData;
 
 void loop() {
+  // Call the double reset detector loop method every so often,
+  // so that it can recognise when the timeout expires.
+  // You can also call drd.stop() when you wish to no longer
+  // consider the next reset as a double reset.
+  drd.loop();
 
-  settings.handle();
+  ArduinoOTA.handle();
 
-  if (irrecv.decode(&results))
-  {
-    dump(&results);
-    irrecv.resume(); // Receive the next value
-  }
 
   // Periodically send UDP Discovery Beacon
   unsigned long currentMillis = millis();
@@ -210,24 +242,6 @@ void loop() {
     serverClient.stop();
   }
 
-  // Check if there are any new debug clients
-  if (debugServer.hasClient()) {
-    for (i = 0; i < MAX_DBG_SRV_CLIENTS; i++)
-    {
-      // Find free/disconnected spot
-      if (!debugServerClients[i] || !debugServerClients[i].connected()) {
-        if (debugServerClients[i]) debugServerClients[i].stop();
-        debugServerClients[i] = debugServer.available();
-        // Serial.print("New debug client: "); // Serial.println(i);
-        debugSend("Welcome debug client");
-        continue;
-      }
-    }
-    // No free/disconnected spot so reject
-    WiFiClient debugServerClient = debugServer.available();
-    debugServerClient.stop();
-  }
-
   // Check Global Caché clients for data
   for (i = 0; i < MAX_SRV_CLIENTS; i++) {
     if (serverClients[i] && serverClients[i].connected())
@@ -243,23 +257,12 @@ void loop() {
         else
         {
           inData.trim(); // Remove extraneous whitespace; this is important
-          // Serial.print("> ");
-          // Serial.println(inData);
-          debugSend(inData);
+          //Serial.print("> ");
+          //Serial.println(inData);
 
           if (inData == "getdevices") {
             send(i, "device,1,3 IR");
             send(i, "endlistdevices");
-          }
-
-          if (inData == "get_IRL") {
-            send(i, "IR Learner Enabled");
-            clientToSendReceivedCodeTo = i;
-            // send(i, "sendir,1:1,4,38400,1,69,347,173,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,65,22,65,22,65,22,65,22,65,22,65,22,65,22,65,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,65,22,65,22,65,22,65,22,65,22,65,22,65,22,65,22,1527,347,87,22,3692");
-          }
-
-          if (inData == "stop_IRL") {
-            send(i, "IR Learner Disabled");
           }
 
           if (inData == "getversion")
@@ -268,39 +271,12 @@ void loop() {
           if (inData == "getversion,0")
             send(i, "1.0");
 
-          if (inData == "VERSION") // LIRC
-            lircSend(i, inData, "1.0 implementing http://www.harctoolbox.org/lirc_ccf.html#Extensions+to+the+irsend+command");
-
-          if (inData == "END") // LIRC
-            lircSend(i, inData, "");
-
-          if (inData.startsWith("SET_TRANSMITTERS")) // LIRC
-            lircSend(i, inData, "");
-
-          if (inData.startsWith("SEND_CCF_ONCE")) // LIRC
-          {
-            lircSend(i, inData, "");
-            inData.replace("SEND_CCF_ONCE 0 ", "");
-            ph.convert(inData);
-            irsend.sendRaw(ph.convertedRaw, ph.length, ph.frequency);
-            debugSend("# Sent Pronto Hex converted to raw --> " + ph.join(ph.convertedRaw, ph.length));
-          }
-
-          if (inData == "LIST") // LIRC
-            lircSend(i, inData, "MyAwesomeRemote");
-
-          if (inData == "LIST MyAwesomeRemote") // LIRC
-            lircSend(i, inData, "MyAwesomeCommand");
-
-          if (inData.startsWith("SEND_ONCE MyAwesomeRemote MyAwesomeCommand")) // LIRC
-            lircSend(i, inData, "TODO: Implement actual sending here!"); // TODO: Implement actual sending here!
-
           // To see what gets sent to the device, enable "Verbose" in the "Options" menu of IRScrutinizer
 
           if (inData.startsWith("sendir,"))
           {
             int numberOfStringParts = getNumberOfDelimiters(inData, ',');
-            int numberOfIrElements = numberOfStringParts - 5;
+            int numberOfIrElements = numberOfStringParts - 2;
 
             int Array[numberOfStringParts];
             char *tmp;
@@ -311,30 +287,17 @@ void loop() {
               tmp = strtok(NULL, ",");
             }
 
-            // Calculate the number of array elements that are not part of the repeat sequence
-            int numberOfNonrepeatIrElements = numberOfIrElements;
-            if ( Array[4] > 5 ) numberOfNonrepeatIrElements = Array[5] - 1; // If repeat is >1, then Offset minus 1; TODO: Correct this. Using >5 for iRule Samsung TV codes. Check this
-            // Serial.println("numberOfNonrepeatIrElements: ");
-            // Serial.println(numberOfNonrepeatIrElements);
-
-            // Construct an array that holds all elements that are not part of the repeat sequence
-            unsigned int RawArray[numberOfNonrepeatIrElements];
-            for (int iii = 0; iii < numberOfNonrepeatIrElements; iii++)
+            uint16_t RawArray[numberOfIrElements];
+            for (int iii = 0; iii < numberOfIrElements; iii++)
             {
-              RawArray[iii] = ((1000000 / Array[3]) * Array[6 + iii]) + 0.5 ;
-              // Serial.print(RawArray[iii]);
-              // Serial.print(" ");
+              RawArray[iii] = (Array[3 + iii]);
+              //Serial.print(RawArray[iii]);
+              //Serial.print(" ");
             }
 
-            // Calculate the frequency in KHz so that it can be passed to irsend.sendRaw()
-            unsigned int freq = (Array[3] / 1000) + 0.5;
-            // Serial.println("freq: ");
-            // Serial.println(freq);
-
-            // Serial.println("Sending");
-            irsend.sendRaw(RawArray, numberOfNonrepeatIrElements, freq);
             send(i, "completeir,1:1," + String(Array[2], DEC));
-            debugSend("# Sent Global Caché converted to raw --> " + ph.join(RawArray, numberOfNonrepeatIrElements));
+            irsend.sendGC(RawArray, numberOfIrElements);
+            Serial.print("sent IR"); 
           }
           inData = ""; // Clear recieved buffer
         }
@@ -353,36 +316,6 @@ void send(int client, String str)
   }
 }
 
-// lircd's reply packets are described at http://www.lirc.org/html/technical.html
-void lircSend(int client, String command, String data) // LIRC
-{
-  // Determine the number of lines to be sent
-  int numberOfLines;
-  if (data == "")
-  {
-    numberOfLines = 0;
-  }
-  else
-  {
-    numberOfLines = getNumberOfDelimiters(data, '\n') + getNumberOfDelimiters(data, '\r') + 1; // Assuming new lines are done with \n or \r
-  }
-  send(client, "BEGIN");
-  send(client, command);
-  send(client, "SUCCESS");
-  send(client, "DATA");
-  send(client, String(numberOfLines));
-  if (data != "") send(client, data);
-  send(client, "END");
-}
-
-void debugSend(String str)
-{
-  int client = 0;
-  if (debugServerClients[client] && debugServerClients[client].connected()) {
-    debugServerClients[client].print(str + "\r\n");
-    delay(1);
-  }
-}
 
 // Count the number of times separator character appears in the text
 int getNumberOfDelimiters(String data, char delimiter)
@@ -397,11 +330,7 @@ int getNumberOfDelimiters(String data, char delimiter)
   return stringData;
 }
 
-// The Discovery Beacon is a UDP packet sent to
-// the multicast IP address 239.255.250.250 on UDP port number 9131
-// To check its correctness, use the AmxBeaconListener that is built into IrScrutinizer
-// The Beacon message must include Device-SDKClass, Device-Make, and Device-Model.
-// For IP controlled devices Device-UUID is added for identification purposes.
+
 void sendDiscoveryBeacon()
 {
   IPAddress ipMulti(239, 255, 250, 250); // 239.255.250.250

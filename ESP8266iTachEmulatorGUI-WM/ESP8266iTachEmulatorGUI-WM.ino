@@ -14,13 +14,14 @@ CHANGELOG
   Removed unneeded reciever code
   removed unneeded RCswitch
   Removed unneeded LIRC
-  Removed debug telnet server, converted debugsend back to serial
+  Removed debug telnet server, converted DebugSend back to serial for easier debugging
   removed unnessary raw ir code conversion
   updated code to work with IRremoteESP8266 v2.1.1
   
 TODO
-fix static IP
-
+revert serial to DebugSend tor free up pins for esp-01
+add reciver code back (sent over Debug)
+add static IP, https://github.com/alexkirill/WiFiManager already has this but it dosn't work on reboot
 
 Circuit
   reffer to google "ESP infared"

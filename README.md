@@ -16,6 +16,21 @@ Known to work with
 * [IrScrutinizer](https://github.com/bengtmartensson/harctoolboxbundle/releases), a very powerful software to work with infrared remote control codes, see the [IrScrutinizer Guide](http://www.hifi-remote.com/wiki/index.php?title=IrScrutinizer_Guide) to get an impression of what it can do
 * Android/iOS [iRule app](http://iruleathome.com) with remote created with cloud codes online at http://iruleathome.com
 
+## Changes form original
+ * Created WifiManager version
+ * added OTA Function back (because it got removed due to changing to WifiManager over EspManager)
+ * Removed unneeded reciever code (May add this back eventually)
+ * removed unneeded RCswitch (noclue why it was even used, since its used to cotrol RF 433mhz)
+ * Removed unneeded LIRC
+ * Removed debug telnet server, converted DebugSend back to serial
+ * updated code to work with IRremoteESP8266 v2.1.1 
+ *(This also removed the uneeded raw conversion, IRremoteESP8266 already has a send Global Cache function "irsend.sendGC" )
+  
+## TODO
+* revert serial to DebugSend tor free up pins for esp-01
+* add reciver code back (sent over Debug)
+* add static IP, https://github.com/alexkirill/WiFiManager already has this but it dosn't work on reboot
+
 ## Example use case
 
 Using my TRRS Idea i use it for home automation controled by the anymote app

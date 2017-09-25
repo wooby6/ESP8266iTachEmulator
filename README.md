@@ -29,7 +29,7 @@ Known to work with
   
 ## TODO
 * revert serial to DebugSend tor free up pins for esp-01
-* add reciver code back (sent over Debug)
+* add reciver code back (sent over DebugSend)
 * add static IP, https://github.com/alexkirill/WiFiManager already has this but it dosn't work on reboot
 
 ## Example use case

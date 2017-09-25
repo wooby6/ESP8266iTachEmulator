@@ -44,7 +44,7 @@ Using my TRRS Idea i use it for home automation controled by the anymote app
 
 ## libraries
 
-* https://github.com/sebastienwarin/IRremoteESP8266
+* https://github.com/markszabo/IRremoteESP8266
 * https://github.com/kentaylor/WiFiManager
 * https://github.com/datacute/DoubleResetDetector
 

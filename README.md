@@ -24,7 +24,8 @@ Known to work with
  * Removed unneeded LIRC
  * Removed debug telnet server, converted DebugSend back to serial
  * updated code to work with IRremoteESP8266 v2.1.1 
- *(This also removed the uneeded raw conversion, IRremoteESP8266 already has a send Global Cache function "irsend.sendGC" )
+ (This also removed the uneeded raw conversion, IRremoteESP8266 already has a send Global Cache function "irsend.sendGC" )
+ * Removed Prontohex (needed for raw conversion)
   
 ## TODO
 * revert serial to DebugSend tor free up pins for esp-01

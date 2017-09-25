@@ -33,13 +33,15 @@ Circuit
   my circuit only uses data & GND
 */
 
-//start setup
+//	start setup
 // Set IR Blaster Pin
-//nodemcu- 0=D3,1=U0TX,2=D4,4=D2/LED/U1TX,3=U0RX,5=D1,6=CLK,7=SD0,8=SD1,9=SD2,10=SD3,11=CMD,12=D6,13=D7,14=D5,15=D8,16=D0
+//nodemcu- 0=D3,1=U0TX,2=D4/LED/U1TX,4=D2,3=U0RX,5=D1,6=CLK,7=SD0,8=SD1,9=SD2,10=SD3,11=CMD,12=D6,13=D7,14=D5,15=D8,16=D0
 #define infraredLedPin 5 //nodemcu
 //esp-01-1=TX,2=GPIO2/tx2,0=GPIO0/spi,3=RX
 //#define infraredLedPin 2 //esp-01
 //#define infraredLedPin 0 //esp-01
+
+//	LED
 #define PIN_LED 2  //set to -1 to disable, nodemcu_LED=2, ESP-01_LED=1 + need to switch tx to GPIO02
 //PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0TXD_U, FUNC_GPIO1) //change ESP-01 tx to GPIO01
 //PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO2_U, FUNC_U1TXD_U) //move TX

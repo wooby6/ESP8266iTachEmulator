@@ -38,6 +38,8 @@ Using my TRRS Idea i use it for home automation controled by the anymote app
 ## Building
 **ESP8266iTachEmulatorGUI-wm** Now uses wifimanager partuctally kentaylor version [WifiManager](https://github.com/kentaylor/WiFiManager) 
 
+* making it configurable with [ESP Connect](https://play.google.com/store/apps/details?id=au.com.umranium.espconnect&hl=en)
+
 
 ## libraries
 

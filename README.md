@@ -34,7 +34,8 @@ Known to work with
 
 ## Example use case
 
-Using my TRRS Idea i use it for home automation controled by the anymote app
+Using my TRRS Idea i use it for home automation controled by the anymote app, My true goal is to intergrate it into an ir repeater
+
 
 ## Building
 **ESP8266iTachEmulatorGUI-wm** Now uses wifimanager partuctally kentaylor version [WifiManager](https://github.com/kentaylor/WiFiManager) 

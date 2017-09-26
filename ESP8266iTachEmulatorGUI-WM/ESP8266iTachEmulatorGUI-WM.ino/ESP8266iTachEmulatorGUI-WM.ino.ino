@@ -36,20 +36,19 @@ Circuit
 //	start setup
 // Set IR Blaster Pin
 //nodemcu- 0=D3,1=U0TX,2=D4/LED/U1TX,4=D2,3=U0RX,5=D1,6=CLK,7=SD0,8=SD1,9=SD2,10=SD3,11=CMD,12=D6,13=D7,14=D5,15=D8,16=D0
-#define infraredLedPin 5 //nodemcu
 //esp-01-1=TX,2=GPIO2/tx2,0=GPIO0/spi,3=RX
-//#define infraredLedPin 2 //esp-01
-//#define infraredLedPin 0 //esp-01
+#define infraredLedPin 2 //esp-01
+
 
 //	LED
-#define PIN_LED 2  //set to -1 to disable, nodemcu_LED=2, ESP-01_LED=1 + need to switch tx to GPIO02
-//PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0TXD_U, FUNC_GPIO1) //change ESP-01 tx to GPIO01
-//PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO2_U, FUNC_U1TXD_U) //move TX
+//#define PIN_LED 2  //comment to disable, nodemcu_LED=2, ESP-01_LED=1 + need to switch tx to GPIO02
+#define HOSTNAME "Wifi2IR-ESP-"  //mdns hostname
 //end setup
 
 #include <ESP8266WiFi.h>
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
+#include <ESP8266mDNS.h>
 
 // For WifiManager
 
@@ -98,11 +97,15 @@ extern "C" {
 void setup() {
   Serial.begin(115200);
   Serial.println("Booting");
+
+  String hostname(HOSTNAME);
+  hostname += String(ESP.getChipId(), HEX);
+  WiFi.hostname(hostname);
   
   //		WiFiManager
-  if(PIN_LED != -1){
+  #ifdef PIN_LED
     pinMode(PIN_LED, OUTPUT);
-  }
+  #endif
     //WiFi.printDiag(Serial); //Remove this line if you do not want to see WiFi password printed
   if (WiFi.SSID()==""){
     Serial.println("We haven't got any access point credentials, so get them now");   
@@ -132,16 +135,16 @@ void setup() {
       //if you get here you have connected to the WiFi
       Serial.println("connected...yeey :)");
     }
-    if(PIN_LED != -1){
+    #ifdef PIN_LED
       digitalWrite(PIN_LED, HIGH); // Turn led off as we are not in configuration mode.
-    }
+    #endif
     ESP.reset(); // This is a bit crude. For some unknown reason webserver can only be started once per boot up 
     // so resetting the device allows to go back into config mode again when it reboots.
     delay(5000);
   }
-  if(PIN_LED != -1){
+  #ifdef PIN_LED
     digitalWrite(PIN_LED, HIGH); // Turn led off as we are not in configuration mode.
-  }
+  #endif
   WiFi.mode(WIFI_STA); // Force to station mode because if device was switched off while in access point mode it will start up next time in access point mode.
   unsigned long startedAt = millis();
   Serial.print("After waiting ");
@@ -156,17 +159,9 @@ void setup() {
     Serial.print("local ip: ");
     Serial.println(WiFi.localIP());
   }
-  ///////////////////////////////////////////
-
-  //		OTA
-  // Port defaults to 8266
-  // ArduinoOTA.setPort(8266);
-
-  // Hostname defaults to esp8266-[ChipID]
-  // ArduinoOTA.setHostname("myesp8266");
-
-  // No authentication by default
-  // ArduinoOTA.setPassword("admin");
+   //		OTA
+  ArduinoOTA.setHostname((const char *)hostname.c_str());
+  ArduinoOTA.setPassword("wifi2ir");
   ArduinoOTA.onStart([]() {
     String type;
     if (ArduinoOTA.getCommand() == U_FLASH)
@@ -300,7 +295,7 @@ void loop() {
 
             send(i, "completeir,1:1," + String(Array[2], DEC));
             irsend.sendGC(RawArray, numberOfIrElements);
-            Serial.print("sent IR"); 
+            Serial.println("sent IR"); 
           }
           inData = ""; // Clear recieved buffer
         }

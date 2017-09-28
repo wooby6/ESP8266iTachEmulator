@@ -33,45 +33,46 @@ Circuit
   my circuit only uses data & GND
 */
 
-//	start setup
-// Set IR Blaster Pin
+//	PIN SETUP
+
 //nodemcu- 0=D3,1=U0TX,2=D4/LED/U1TX,4=D2,3=U0RX,5=D1,6=CLK,7=SD0,8=SD1,9=SD2,10=SD3,11=CMD,12=D6,13=D7,14=D5,15=D8,16=D0
-//esp-01-1=TX,2=GPIO2/tx2,0=GPIO0/spi,3=RX
-#define infraredLedPin 2 //esp-01
+//Wemos D1mini- 0=D3,1=U0TX,2=D4/LED/U1TX,4=D2,3=U0RX,5=D1,12=D6,13=D7,14=D5,15=D8,16=D0
+//esp-01- 1=TXl/LED,2=GPIO2/tx2,0=GPIO0/spi,3=RX
+
+// Set IR Blaster Pin
+#define infraredLedPin 0 //esp-01
 
 
 //	LED
-//#define PIN_LED 2  //comment to disable, nodemcu_LED=2, ESP-01_LED=1 + need to switch tx to GPIO02
+//#define PIN_LED 2  //uncomment enable nodemcu/Wemos_LED = 2
+#define LED_invert 2 // uncomment this for LED that have a inverted singal. also for an ESP-01 LED is attached to TX line so cant use TX at the same time
 #define HOSTNAME "Wifi2IR-ESP-"  //mdns hostname
 //end setup
 
+// For Wifi2IR + inital
 #include <ESP8266WiFi.h>
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
 #include <ESP8266mDNS.h>
-
+#include <WiFiUdp.h>
+// For OTA
+#include "ArduinoOTA.h"
+// For DRD
+#include <DoubleResetDetector.h>  //https://github.com/datacute/DoubleResetDetector
 // For WifiManager
 
 #include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
 #include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
 #include <WiFiManager.h>          //https://github.com/kentaylor/WiFiManager
 
-#include "ArduinoOTA.h"
-#include <WiFiUdp.h>
-#include <DoubleResetDetector.h>  //https://github.com/datacute/DoubleResetDetector
-
-// Number of seconds after reset during which a 
-// subseqent reset will be considered a double reset.
-#define DRD_TIMEOUT 7
-
-// RTC Memory Address for the DoubleResetDetector to use
-#define DRD_ADDRESS 0
-
+// VAR - DRD
+#define DRD_TIMEOUT 10 // Number of seconds after reset during which a subseqent reset will be considered a double reset.
+#define DRD_ADDRESS 0 // RTC Memory Address for the DoubleResetDetector to use
 DoubleResetDetector drd(DRD_TIMEOUT, DRD_ADDRESS);
+bool initialConfig = false; // Indicates whether ESP has WiFi credentials saved from previous session, or double reset detected
+// VAR - DRD //
 
-// Indicates whether ESP has WiFi credentials saved from previous session, or double reset detected
-bool initialConfig = false;
-
+//VAR - Wifi2IR
 extern const String MYVAL;
 IRsend irsend(infraredLedPin);
 unsigned int irrawCodes[99];
@@ -89,6 +90,7 @@ WiFiUDP Udp;
 unsigned long previousMillis = 0;
 const long interval = random(10000, 60000); // Send every 10...60 seconds like the original
 // const long interval = 3000; // for debugging
+// VAR - Wifi2IR //
 
 // ESP SDK
 extern "C" {
@@ -102,9 +104,14 @@ void setup() {
   hostname += String(ESP.getChipId(), HEX);
   WiFi.hostname(hostname);
   
-  //		WiFiManager
+  //	S -	WiFiManager
   #ifdef PIN_LED
     pinMode(PIN_LED, OUTPUT);
+    Serial.println("LED Confugured - Normal Mode");
+  #endif
+  #ifdef LED_invert
+    pinMode(LED_invert, OUTPUT);
+    Serial.println("LED Confugured - Inverted Mode");
   #endif
     //WiFi.printDiag(Serial); //Remove this line if you do not want to see WiFi password printed
   if (WiFi.SSID()==""){
@@ -117,9 +124,14 @@ void setup() {
   }
   if (initialConfig) {
     Serial.println("Starting configuration portal.");
-    if(PIN_LED != -1){
+    #ifdef PIN_LED
       digitalWrite(PIN_LED, LOW); // turn the LED on by making the voltage LOW to tell us we are in configuration mode.
-    }
+      Serial.println("LED ON");
+    #endif
+    #ifdef LED_invert
+      digitalWrite(LED_invert, HIGH);
+      Serial.println("LED ON");    
+    #endif
     //Local intialization. Once its business is done, there is no need to keep it around
     WiFiManager wifiManager;
     //sets timeout in seconds until configuration portal gets turned off.
@@ -137,6 +149,11 @@ void setup() {
     }
     #ifdef PIN_LED
       digitalWrite(PIN_LED, HIGH); // Turn led off as we are not in configuration mode.
+      Serial.println("LED OFF");
+    #endif
+    #ifdef LED_invert
+      digitalWrite(LED_invert, LOW);
+      Serial.println("LED OFF");    
     #endif
     ESP.reset(); // This is a bit crude. For some unknown reason webserver can only be started once per boot up 
     // so resetting the device allows to go back into config mode again when it reboots.
@@ -144,6 +161,11 @@ void setup() {
   }
   #ifdef PIN_LED
     digitalWrite(PIN_LED, HIGH); // Turn led off as we are not in configuration mode.
+    Serial.println("LED OFF");
+  #endif
+  #ifdef LED_invert
+    digitalWrite(LED_invert, LOW);
+    Serial.println("LED OFF");    
   #endif
   WiFi.mode(WIFI_STA); // Force to station mode because if device was switched off while in access point mode it will start up next time in access point mode.
   unsigned long startedAt = millis();
@@ -159,7 +181,9 @@ void setup() {
     Serial.print("local ip: ");
     Serial.println(WiFi.localIP());
   }
-   //		OTA
+  //  wifi Connected
+  //  S -  WiFiManager //
+  //	S - OTA
   ArduinoOTA.setHostname((const char *)hostname.c_str());
   ArduinoOTA.setPassword("wifi2ir");
   ArduinoOTA.onStart([]() {
@@ -188,7 +212,7 @@ void setup() {
   });
   ArduinoOTA.begin();
   Serial.println("\n OTA Ready");
-  ////////////////////////////////////////////////
+  // S - OTA //
 
   // Start Wifi2IR server
   irsend.begin();
@@ -201,18 +225,20 @@ void setup() {
   sendDiscoveryBeacon();
 }
 
+// S - OTA //
+
 String inData;
 
 void loop() {
-  // Call the double reset detector loop method every so often,
-  // so that it can recognise when the timeout expires.
-  // You can also call drd.stop() when you wish to no longer
-  // consider the next reset as a double reset.
+  // L - DRD 
   drd.loop();
-
+  // L - DRD //
+  
+  // L - OTA
   ArduinoOTA.handle();
+  // L - OTA //
 
-
+  // L - Wifi2IR
   // Periodically send UDP Discovery Beacon
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillis >= interval)
@@ -302,8 +328,9 @@ void loop() {
       }
     }
   }
+  // L - Wifi2IR //
 }
-
+// CF - Wifi2IR 
 void send(int client, String str)
 {
   if (serverClients[client] && serverClients[client].connected()) {
